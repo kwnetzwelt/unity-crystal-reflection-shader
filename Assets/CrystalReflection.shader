@@ -2,8 +2,10 @@
 
 Shader "Custom/CrystalReflection" {
 	Properties {
-		_Color ("Color", Color) = (1,1,1,1)
-		_MainTex ("Albedo (RGB)", 2D) = "white" {}
+		[HDR]_Color ("Color", Color) = (1,1,1,1)
+		[Normal]_Roughness("Roughness", 2D) = "white" {}
+		_NormalImpact("Normal Multiplier", Range(-2,2)) = 1
+		_MainTex("Albedo (RGB)", 2D) = "white" {}
 		_Glossiness ("Smoothness", Range(0,1)) = 0.5
 		_Metallic ("Metallic", Range(0,1)) = 0.0
 	}
@@ -17,26 +19,30 @@ Shader "Custom/CrystalReflection" {
 		Tags{ "RenderType"="Transparent" "Queue" = "Transparent" }
 
 		LOD 200
-		
-		CGPROGRAM
+		ZWrite On
+		ZTest LEqual
 
+		CGPROGRAM
+		
 		// Physically based Standard lighting model, and enable shadows on all light types
-		#pragma surface surf Standard vertex:vert alpha //fullforwardshadows
+		#pragma surface surf Standard vertex:vert //fullforwardshadows
 
 		// Use shader model 3.0 target, to get nicer looking lighting
-		#pragma target 3.0
+		#pragma target 4.0
 
 
 		struct Input {
-			float2 uv_MainTex : TEXCOORD0;
-			float4 grabPos : TEXCOORD1;
+			float2 uv_MainTex : TEXCOORD5;
+			half4 grabPos : TEXCOORD1;
 			float4 pos : SV_POSITION;
-			float3 viewDir : TEXCOORD2;
+			half3 viewDir : TEXCOORD2;
 			float3 normal : TEXCOORD3;
+			INTERNAL_DATA
 		};
 
 		half _Glossiness;
 		half _Metallic;
+		half _NormalImpact;
 		fixed4 _Color;
 
 		// Add instancing support for this shader. You need to check 'Enable Instancing' on materials that use the shader.
@@ -57,19 +63,23 @@ Shader "Custom/CrystalReflection" {
 			
 		}
 
-		sampler2D _MainTex;
+		sampler2D _Roughness;
 		sampler2D _GrabTexture;
+		sampler2D _MainTex;
+
 		void surf (Input IN, inout SurfaceOutputStandard o) {
 			// Albedo comes from a texture tinted by color
-			fixed4 c = _Color;// tex2D(_MainTex, IN.uv_MainTex) * _Color;
+			fixed4 c = tex2D(_MainTex, IN.uv_MainTex) * _Color;
 			
 			//c = tex2Dproj(_BackgroundTexture, UNITY_PROJ_COORD(IN.grabPos)) * (1 - _Color.a);
-			o.Albedo = c.rgb;
+			half3 normal = UnpackNormal(tex2D(_Roughness, IN.uv_MainTex) * tex2D(_Roughness, IN.uv_MainTex * 33.333)) * _NormalImpact;
+			half rim1 = saturate(dot(normalize(IN.viewDir), o.Normal));
+			half rim = saturate(pow(dot(normalize(IN.viewDir), o.Normal + normal.xyzz), _Glossiness * 10));
+			fixed4 e = tex2Dproj(_GrabTexture, UNITY_PROJ_COORD(IN.grabPos + normal.xyzz));
+			o.Albedo = e * _Color;
 			
 
-			fixed4 e = tex2Dproj(_GrabTexture, UNITY_PROJ_COORD(IN.grabPos));
-			o.Emission = e;
-			
+			o.Emission = rim * rim1 * _Color;// o.Albedo * e;
 			// Metallic and smoothness come from slider variables
 			o.Metallic = _Metallic;
 			o.Smoothness = _Glossiness;
